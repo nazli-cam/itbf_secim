@@ -13,7 +13,7 @@ function createTransporter() {
 }
 async function sendVoteToken(email, token, electionTitle, baseUrl) {
   const transporter = createTransporter();
-const voteUrl = `${baseUrl}/vote/${token}`;
+const  = `${baseUrl}/vote/${token}`;
   await transporter.sendMail({
     from: "Election System" <${process.env.FROM_EMAIL}>,
     to: email,
@@ -24,7 +24,7 @@ const voteUrl = `${baseUrl}/vote/${token}`;
         <p>You have been invited to participate in the election: <strong>${electionTitle}</strong></p>
         <p>Please click the link below to cast your secret ballot:</p>
         <p style="text-align: center; margin: 30px 0;">
-          <a href="${voteUrl}"
+          <a href="${}"
              style="background-color: #3498db; color: white; padding: 14px 28px;
                     text-decoration: none; border-radius: 6px; font-size: 16px;">
             Cast Your Vote
@@ -33,7 +33,7 @@ const voteUrl = `${baseUrl}/vote/${token}`;
         <p style="color: #7f8c8d; font-size: 13px;">
           This link is unique to you. Do not share it with others.<br>
           If the button does not work, copy and paste this URL into your browser:<br>
-          <a href="${voteUrl}">${voteUrl}</a>
+          <a href="${}">${}</a>
         </p>
         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
         <p style="color: #bdc3c7; font-size: 12px;">This is an automated message from the election system.</p>
@@ -43,7 +43,7 @@ const voteUrl = `${baseUrl}/vote/${token}`;
 }
 async function sendReminder(email, token, electionTitle, baseUrl) {
   const transporter = createTransporter();
-  const voteUrl = ${baseUrl}/vote/${token};
+const  = `${baseUrl}/vote/${token}`;
   await transporter.sendMail({
     from: "Election System" <${process.env.FROM_EMAIL}>,
     to: email,
@@ -54,7 +54,7 @@ async function sendReminder(email, token, electionTitle, baseUrl) {
         <p>This is a reminder that you have not yet cast your vote in: <strong>${electionTitle}</strong></p>
         <p>Please click the link below to cast your secret ballot:</p>
         <p style="text-align: center; margin: 30px 0;">
-          <a href="${voteUrl}"
+          <a href="${}"
              style="background-color: #e67e22; color: white; padding: 14px 28px;
                     text-decoration: none; border-radius: 6px; font-size: 16px;">
             Vote Now
@@ -63,7 +63,7 @@ async function sendReminder(email, token, electionTitle, baseUrl) {
         <p style="color: #7f8c8d; font-size: 13px;">
           This link is unique to you. Do not share it with others.<br>
           If the button does not work, copy and paste this URL into your browser:<br>
-          <a href="${voteUrl}">${voteUrl}</a>
+          <a href="${}">${}</a>
         </p>
         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
         <p style="color: #bdc3c7; font-size: 12px;">This is an automated message from the election system.</p>
