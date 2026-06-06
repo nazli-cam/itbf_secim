@@ -1,52 +1,50 @@
-const nodemailer = require('nodemailer');
 require('dotenv').config();
 
-function createTransporter() {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: process.env.SMTP_PORT === '465',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
-    }
+async function sendEmail(to, subject, html) {
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.SMTP_PASS}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: process.env.FROM_EMAIL,
+      to,
+      subject,
+      html
+    })
   });
+  const data = await response.json();
+  if (!response.ok) throw new Error(JSON.stringify(data));
+  return data;
 }
 
 async function sendVoteToken(email, token, electionTitle, baseUrl) {
-  const transporter = createTransporter();
   const voteUrl = `${baseUrl}/vote/${token}`;
-  await transporter.sendMail({
-    from: `"Election System" <${process.env.FROM_EMAIL}>`,
-    to: email,
-    subject: `Your Voting Link – ${electionTitle}`,
-    html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  await sendEmail(email, `Your Voting Link – ${electionTitle}`, `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2 style="color: #2c3e50;">You have been invited to vote</h2>
       <p>You have been invited to participate in: <strong>${electionTitle}</strong></p>
       <p style="text-align: center; margin: 30px 0;">
         <a href="${voteUrl}" style="background-color: #3498db; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-size: 16px;">Cast Your Vote</a>
       </p>
       <p style="color: #7f8c8d; font-size: 13px;">This link is unique to you. Do not share it.<br><a href="${voteUrl}">${voteUrl}</a></p>
-    </div>`
-  });
+    </div>
+  `);
 }
 
 async function sendReminder(email, token, electionTitle, baseUrl) {
-  const transporter = createTransporter();
   const voteUrl = `${baseUrl}/vote/${token}`;
-  await transporter.sendMail({
-    from: `"Election System" <${process.env.FROM_EMAIL}>`,
-    to: email,
-    subject: `Reminder: You haven't voted yet – ${electionTitle}`,
-    html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  await sendEmail(email, `Reminder: You haven't voted yet – ${electionTitle}`, `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2 style="color: #e67e22;">Voting Reminder</h2>
       <p>You have not yet voted in: <strong>${electionTitle}</strong></p>
       <p style="text-align: center; margin: 30px 0;">
         <a href="${voteUrl}" style="background-color: #e67e22; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-size: 16px;">Vote Now</a>
       </p>
-      <p style="color: #7f8c8d; font-size: 13px;">This link is unique to you. Do not share it.<br><a href="${voteUrl}">${voteUrl}</a></p>
-    </div>`
-  });
+      <p style="color: #7f8c8d; font-size: 13px;">This link is unique to you.<br><a href="${voteUrl}">${voteUrl}</a></p>
+    </div>
+  `);
 }
 
 function buildResultsHtml(election, questionsWithResults) {
@@ -79,32 +77,21 @@ function buildResultsHtml(election, questionsWithResults) {
     <h2 style="color: #2c3e50;">Election Results: ${election.title}</h2>
     ${election.description ? `<p>${election.description}</p>` : ''}
     ${questionBlocks}
-    <p style="color: #bdc3c7; font-size: 12px;">This is an automated message from the election system.</p>
+    <p style="color: #bdc3c7; font-size: 12px;">Automated message from the election system.</p>
   </div>`;
 }
 
 async function sendResults(email, questionsWithResults, election) {
-  const transporter = createTransporter();
   const html = buildResultsHtml(election, questionsWithResults);
-  await transporter.sendMail({
-    from: `"Election System" <${process.env.FROM_EMAIL}>`,
-    to: email,
-    subject: `Election Results – ${election.title}`,
-    html
-  });
+  await sendEmail(email, `Election Results – ${election.title}`, html);
 }
 
 async function sendAdminCompletion(election, questionsWithResults) {
   const adminEmail = process.env.ADMIN_EMAIL;
   if (!adminEmail) return;
-  const transporter = createTransporter();
   const html = buildResultsHtml(election, questionsWithResults);
-  await transporter.sendMail({
-    from: `"Election System" <${process.env.FROM_EMAIL}>`,
-    to: adminEmail,
-    subject: `[ADMIN] Election Complete – ${election.title}`,
-    html: `<p><strong>All votes have been received.</strong></p>${html}`
-  });
+  await sendEmail(adminEmail, `[ADMIN] Election Complete – ${election.title}`,
+    `<p><strong>All votes have been received.</strong></p>${html}`);
 }
 
 async function batchSend(items, sendFn) {
