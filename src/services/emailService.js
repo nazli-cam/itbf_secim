@@ -1,184 +1,45 @@
-const nodemailer = require('nodemailer');
-require('dotenv').config();
+router.post('/api/send-tokens', requireAdmin, csrfProtection, async (req, res) => {
+  try {
+    const election = await queries.getActiveElection();
+    if (!election) return res.status(404).json({ error: 'No election found' });
 
-function createTransporter() {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: process.env.SMTP_PORT === '465',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
-    }
-  });
-}
+    const voters = await queries.getVotersByElection(election.id);
+    const unsent = voters.filter(v => !v.token_sent_at);
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
 
-async function sendVoteToken(email, token, electionTitle, baseUrl) {
-  const transporter = createTransporter();
-  const voteUrl = `${baseUrl}/vote/${token}`;
-
-  await transporter.sendMail({
-    from: `"Election System" <${process.env.FROM_EMAIL}>`,
-    to: email,
-    subject: `Your Voting Link – ${electionTitle}`,
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2c3e50;">You have been invited to vote</h2>
-        <p>You have been invited to participate in the election: <strong>${electionTitle}</strong></p>
-        <p>Please click the link below to cast your secret ballot:</p>
-        <p style="text-align: center; margin: 30px 0;">
-          <a href="${voteUrl}"
-             style="background-color: #3498db; color: white; padding: 14px 28px;
-                    text-decoration: none; border-radius: 6px; font-size: 16px;">
-            Cast Your Vote
-          </a>
-        </p>
-        <p style="color: #7f8c8d; font-size: 13px;">
-          This link is unique to you. Do not share it with others.<br>
-          If the button does not work, copy and paste this URL into your browser:<br>
-          <a href="${voteUrl}">${voteUrl}</a>
-        </p>
-        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-        <p style="color: #bdc3c7; font-size: 12px;">This is an automated message from the election system.</p>
-      </div>
-    `
-  });
-}
-
-async function sendReminder(email, token, electionTitle, baseUrl) {
-  const transporter = createTransporter();
-  const voteUrl = `${baseUrl}/vote/${token}`;
-
-  await transporter.sendMail({
-    from: `"Election System" <${process.env.FROM_EMAIL}>`,
-    to: email,
-    subject: `Reminder: You haven't voted yet – ${electionTitle}`,
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #e67e22;">Voting Reminder</h2>
-        <p>This is a reminder that you have not yet cast your vote in: <strong>${electionTitle}</strong></p>
-        <p>Please click the link below to cast your secret ballot:</p>
-        <p style="text-align: center; margin: 30px 0;">
-          <a href="${voteUrl}"
-             style="background-color: #e67e22; color: white; padding: 14px 28px;
-                    text-decoration: none; border-radius: 6px; font-size: 16px;">
-            Vote Now
-          </a>
-        </p>
-        <p style="color: #7f8c8d; font-size: 13px;">
-          This link is unique to you. Do not share it with others.<br>
-          If the button does not work, copy and paste this URL into your browser:<br>
-          <a href="${voteUrl}">${voteUrl}</a>
-        </p>
-        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-        <p style="color: #bdc3c7; font-size: 12px;">This is an automated message from the election system.</p>
-      </div>
-    `
-  });
-}
-
-function buildResultsHtml(election, questionsWithResults) {
-  let questionBlocks = '';
-
-  for (const q of questionsWithResults) {
-    const totalVotes = q.options.reduce((sum, o) => sum + parseInt(o.vote_count, 10), 0);
-    let optionRows = '';
-
-    for (const o of q.options) {
-      const count = parseInt(o.vote_count, 10);
-      const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
-      const label = o.is_blank ? `<em>${o.option_text} (Blank)</em>` : o.option_text;
-      optionRows += `
-        <tr>
-          <td style="padding: 8px 12px; border-bottom: 1px solid #eee;">${label}</td>
-          <td style="padding: 8px 12px; border-bottom: 1px solid #eee; text-align: right;">${count}</td>
-          <td style="padding: 8px 12px; border-bottom: 1px solid #eee; text-align: right;">${pct}%</td>
-          <td style="padding: 8px 12px; border-bottom: 1px solid #eee; width: 200px;">
-            <div style="background: #ecf0f1; border-radius: 4px; height: 16px;">
-              <div style="background: #3498db; width: ${pct}%; height: 16px; border-radius: 4px;"></div>
-            </div>
-          </td>
-        </tr>
-      `;
+    if (unsent.length === 0) {
+      return res.json({ success: true, sent: 0, message: 'All voters have already been sent a token' });
     }
 
-    questionBlocks += `
-      <h3 style="color: #2c3e50; margin-top: 24px;">${q.question_text}</h3>
-      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-        <thead>
-          <tr style="background: #f8f9fa;">
-            <th style="padding: 8px 12px; text-align: left;">Option</th>
-            <th style="padding: 8px 12px; text-align: right;">Votes</th>
-            <th style="padding: 8px 12px; text-align: right;">%</th>
-            <th style="padding: 8px 12px;">Distribution</th>
-          </tr>
-        </thead>
-        <tbody>${optionRows}</tbody>
-      </table>
-      <p style="color: #7f8c8d; font-size: 12px;">Total votes: ${totalVotes}</p>
-    `;
+    console.log(`[send-tokens] Starting: ${unsent.length} token(s) to send for election ${election.id}`);
+
+    const results = await emailService.batchSend(unsent, async (voter) => {
+      console.log(`[send-tokens] Sending to ${voter.email} (voter id=${voter.id})`);
+      await emailService.sendVoteToken(voter.email, voter.vote_token, election.title, baseUrl);
+      await queries.markTokenSent(voter.id);
+      console.log(`[send-tokens] Sent and marked: ${voter.email}`);
+    });
+
+    const failed = results.filter(r => !r.success);
+    console.log(`[send-tokens] Done. ${results.length - failed.length} sent, ${failed.length} failed.`);
+    if (failed.length > 0) {
+      failed.forEach(r => console.error(`[send-tokens] FAILED: ${r.item.email} — ${r.error}`));
+    }
+
+    await queries.logAudit('tokens_sent', 'admin', {
+      election_id: election.id,
+      sent: results.length - failed.length,
+      failed: failed.length
+    });
+
+    res.json({
+      success: true,
+      sent: results.length - failed.length,
+      failed: failed.length,
+      message: `Sent ${results.length - failed.length} token(s)${failed.length > 0 ? `, ${failed.length} failed (check logs)` : ''}`
+    });
+  } catch (err) {
+    console.error('[send-tokens] Unexpected error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
-      <h2 style="color: #2c3e50;">Election Results: ${election.title}</h2>
-      ${election.description ? `<p>${election.description}</p>` : ''}
-      ${questionBlocks}
-      <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-      <p style="color: #bdc3c7; font-size: 12px;">This is an automated message from the election system.</p>
-    </div>
-  `;
-}
-
-async function sendResults(email, questionsWithResults, election) {
-  const transporter = createTransporter();
-  const html = buildResultsHtml(election, questionsWithResults);
-
-  await transporter.sendMail({
-    from: `"Election System" <${process.env.FROM_EMAIL}>`,
-    to: email,
-    subject: `Election Results – ${election.title}`,
-    html
-  });
-}
-
-async function sendAdminCompletion(election, questionsWithResults) {
-  const adminEmail = process.env.ADMIN_EMAIL;
-  if (!adminEmail) return;
-
-  const transporter = createTransporter();
-  const html = buildResultsHtml(election, questionsWithResults);
-
-  await transporter.sendMail({
-    from: `"Election System" <${process.env.FROM_EMAIL}>`,
-    to: adminEmail,
-    subject: `[ADMIN] Election Complete – ${election.title}`,
-    html: `<p><strong>All votes have been received. The election is now complete.</strong></p>${html}`
-  });
-}
-
-async function batchSend(items, sendFn) {
-  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const results = [];
-
-  for (const item of items) {
-    try {
-      await sendFn(item);
-      results.push({ item, success: true });
-    } catch (err) {
-      console.error('Email send error:', err.message);
-      results.push({ item, success: false, error: err.message });
-    }
-    await delay(500);
-  }
-
-  return results;
-}
-
-module.exports = {
-  sendVoteToken,
-  sendReminder,
-  sendResults,
-  sendAdminCompletion,
-  batchSend
-};
+});
