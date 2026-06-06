@@ -13,7 +13,7 @@ function createTransporter() {
 }
 async function sendVoteToken(email, token, electionTitle, baseUrl) {
   const transporter = createTransporter();
-  const voteUrl = ${baseUrl}/vote/${token};
+const voteUrl = `${baseUrl}/vote/${token}`;
   await transporter.sendMail({
     from: "Election System" <${process.env.FROM_EMAIL}>,
     to: email,
