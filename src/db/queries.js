@@ -1,13 +1,29 @@
 const pool = require('./pool');
 
+// ── Elections ──────────────────────────────────────────────────────────────
+
 async function getElection(id) {
-  const { rows } = await pool.query('SELECT * FROM elections WHERE id = $1', [id]);
+  const { rows } = await pool.query(
+    'SELECT * FROM elections WHERE id = $1',
+    [id]
+  );
   return rows[0] || null;
 }
 
 async function getActiveElection() {
-  const { rows } = await pool.query(`SELECT * FROM elections ORDER BY id DESC LIMIT 1`);
+  // Returns the most recent election that is still in progress (draft or active).
+  // Once an election is revealed it is considered complete and a new one can be created.
+  const { rows } = await pool.query(
+    `SELECT * FROM elections WHERE status IN ('draft','active') ORDER BY id DESC LIMIT 1`
+  );
   return rows[0] || null;
+}
+
+async function getAllElections() {
+  const { rows } = await pool.query(
+    `SELECT * FROM elections ORDER BY id DESC`
+  );
+  return rows;
 }
 
 async function createElection(title, description) {
@@ -26,6 +42,8 @@ async function updateElectionStatus(id, status) {
   return rows[0];
 }
 
+// ── Questions ──────────────────────────────────────────────────────────────
+
 async function createQuestion(election_id, question_text, question_order, constraint_type) {
   const { rows } = await pool.query(
     'INSERT INTO questions (election_id, question_text, question_order, constraint_type) VALUES ($1, $2, $3, $4) RETURNING *',
@@ -41,6 +59,8 @@ async function getQuestions(election_id) {
   );
   return rows;
 }
+
+// ── Options ────────────────────────────────────────────────────────────────
 
 async function createOption(question_id, option_text, option_order, is_blank) {
   const { rows } = await pool.query(
@@ -69,6 +89,8 @@ async function getOptionsByElection(election_id) {
   return rows;
 }
 
+// ── Voters ─────────────────────────────────────────────────────────────────
+
 async function createVoter(election_id, email) {
   const { rows } = await pool.query(
     'INSERT INTO voters (election_id, email) VALUES ($1, $2) RETURNING *',
@@ -78,7 +100,10 @@ async function createVoter(election_id, email) {
 }
 
 async function getVoterByToken(token) {
-  const { rows } = await pool.query('SELECT * FROM voters WHERE vote_token = $1', [token]);
+  const { rows } = await pool.query(
+    'SELECT * FROM voters WHERE vote_token = $1',
+    [token]
+  );
   return rows[0] || null;
 }
 
@@ -107,7 +132,10 @@ async function markVoterVoted(token) {
 }
 
 async function markTokenSent(voter_id) {
-  await pool.query('UPDATE voters SET token_sent_at = NOW() WHERE id = $1', [voter_id]);
+  await pool.query(
+    'UPDATE voters SET token_sent_at = NOW() WHERE id = $1',
+    [voter_id]
+  );
 }
 
 async function getUnvotedVoters(election_id) {
@@ -135,6 +163,8 @@ async function getVoterStats(election_id) {
     not_voted: parseInt(row.not_voted, 10)
   };
 }
+
+// ── Votes ──────────────────────────────────────────────────────────────────
 
 async function insertVote(client, election_id, question_id, option_id) {
   const { rows } = await client.query(
@@ -167,6 +197,11 @@ async function getResults(election_id) {
 }
 
 async function getVoteCount(election_id) {
+  const { rows } = await pool.query(
+    `SELECT COUNT(DISTINCT submitted_at) AS count FROM votes WHERE election_id = $1`,
+    [election_id]
+  );
+  // Count by Q1 votes (one per voter)
   const { rows: rows2 } = await pool.query(
     `SELECT COUNT(*) AS count FROM votes v
      JOIN questions q ON v.question_id = q.id
@@ -176,13 +211,18 @@ async function getVoteCount(election_id) {
   return parseInt(rows2[0].count, 10);
 }
 
+// ── Advisory Locks ─────────────────────────────────────────────────────────
+
 async function acquireAdvisoryLock(client, lockId) {
   await client.query('SELECT pg_advisory_xact_lock($1)', [lockId]);
 }
 
 async function releaseAdvisoryLock(client, lockId) {
-  // no-op — transaction-scoped advisory locks release automatically
+  // Advisory transaction locks are released automatically at transaction end.
+  // This is a no-op placeholder for explicit session locks if needed.
 }
+
+// ── Audit Log ──────────────────────────────────────────────────────────────
 
 async function logAudit(action, performed_by, metadata) {
   await pool.query(
@@ -192,13 +232,16 @@ async function logAudit(action, performed_by, metadata) {
 }
 
 async function getAuditLog() {
-  const { rows } = await pool.query('SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 200');
+  const { rows } = await pool.query(
+    'SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 200'
+  );
   return rows;
 }
 
 module.exports = {
   getElection,
   getActiveElection,
+  getAllElections,
   createElection,
   updateElectionStatus,
   createQuestion,
