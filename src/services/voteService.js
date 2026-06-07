@@ -14,9 +14,11 @@ async function submitVote(electionId, q1OptionId, q2OptionId, voterEmail) {
   try {
     await client.query('BEGIN');
 
+    // Acquire advisory lock (transaction-scoped)
     const lockId = electionId * 1000 + 1;
     await client.query('SELECT pg_advisory_xact_lock($1)', [lockId]);
 
+    // Verify voter
     const voterResult = await client.query(
       'SELECT * FROM voters WHERE election_id = $1 AND email = $2',
       [parseInt(electionId, 10), voterEmail.toLowerCase()]
@@ -34,10 +36,16 @@ async function submitVote(electionId, q1OptionId, q2OptionId, voterEmail) {
       return { success: false, error: 'Already voted' };
     }
 
-    await client.query('UPDATE voters SET has_voted = TRUE WHERE id = $1', [voterRow.id]);
+    // Mark voter as voted
+    await client.query(
+      'UPDATE voters SET has_voted = TRUE WHERE id = $1',
+      [voterRow.id]
+    );
 
+    // Random delay to prevent timing correlation
     await randomDelay();
 
+    // Get questions for this election
     const questionsResult = await client.query(
       'SELECT * FROM questions WHERE election_id = $1 ORDER BY question_order ASC',
       [electionId]
@@ -57,16 +65,19 @@ async function submitVote(electionId, q1OptionId, q2OptionId, voterEmail) {
       return { success: false, error: 'Election configuration error' };
     }
 
+    // Insert vote for Q1
     await client.query(
       'INSERT INTO votes (election_id, question_id, option_id) VALUES ($1, $2, $3)',
       [electionId, q1.id, q1OptionId]
     );
 
+    // Insert vote for Q2
     await client.query(
       'INSERT INTO votes (election_id, question_id, option_id) VALUES ($1, $2, $3)',
       [electionId, q2.id, q2OptionId]
     );
 
+    // Check if all voters have voted
     const statsResult = await client.query(
       `SELECT
          COUNT(*) AS total,
@@ -88,12 +99,14 @@ async function submitVote(electionId, q1OptionId, q2OptionId, voterEmail) {
 
     await client.query('COMMIT');
 
+    // Log the vote (no voter identity)
     await queries.logAudit('vote_submitted', 'anonymous', {
       election_id: electionId,
       all_voted: isLastVoter
     });
 
     if (isLastVoter) {
+      // Trigger auto-reveal asynchronously
       setImmediate(() => triggerAutoReveal(electionId));
     }
 
@@ -138,11 +151,14 @@ async function triggerAutoReveal(electionId) {
     );
 
     const voters = await queries.getVotersByElection(electionId);
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
 
+    // Send results to all voters
     await emailService.batchSend(voters, async (voter) => {
       await emailService.sendResults(voter.email, questionsWithResults, election);
     });
 
+    // Send admin completion
     await emailService.sendAdminCompletion(election, questionsWithResults);
 
     await queries.logAudit('election_revealed', 'system', {
