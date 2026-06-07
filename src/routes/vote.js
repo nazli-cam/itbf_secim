@@ -212,7 +212,7 @@ const baseStyles = `
   .btn-success:hover { background: #219a52; }
   .btn-secondary { background: #ecf0f1; color: #2c3e50; }
   .btn-secondary:hover { background: #d5dbdb; }
-  .btn-inline { width: auto; padding: 12px 24px; }
+  .btn-inline { width: auto; }
   label { display: block; font-size: 13px; font-weight: 600; color: #5d6d7e; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
   input[type=email], input[type=text] { width: 100%; padding: 12px 16px; border: 2px solid #ecf0f1; border-radius: 8px; font-size: 15px; outline: none; transition: border-color 0.15s; }
   input[type=email]:focus, input[type=text]:focus { border-color: #3498db; }
@@ -427,12 +427,16 @@ function renderVotePage(data) {
     }
 
     function renderStep2() {
+      const q1 = QUESTIONS.find(q => q.question_order === 1);
       const q2 = QUESTIONS.find(q => q.question_order === 2);
       if (!q2) return;
       const excludeQ1 = q2.constraint_type === 'exclude_q1_selection';
+      const q1SelectedText = excludeQ1 && q1
+        ? (q1.options.find(o => o.id === selections.q1) || {}).option_text
+        : null;
       let optHtml = '';
       for (const opt of q2.options) {
-        const isExcluded = excludeQ1 && opt.id === selections.q1;
+        const isExcluded = excludeQ1 && q1SelectedText && opt.option_text === q1SelectedText;
         const checked = selections.q2 === opt.id ? 'checked' : '';
         const cls = (isExcluded ? ' disabled' : '') + (selections.q2 === opt.id ? ' selected' : '');
         optHtml += \`<li class="option-item">
