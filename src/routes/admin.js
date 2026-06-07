@@ -150,6 +150,7 @@ router.post('/api/voters', requireAdmin, csrfProtection, async (req, res) => {
       return res.status(400).json({ error: 'No valid email addresses found' });
     }
 
+    // Check for duplicates against existing voters
     const existing = await queries.getVotersByElection(electionId);
     const existingEmails = new Set(existing.map(v => v.email.toLowerCase()));
     const newEmails = emails.filter(e => !existingEmails.has(e));
@@ -204,6 +205,24 @@ router.post('/api/activate', requireAdmin, csrfProtection, async (req, res) => {
     await queries.logAudit('election_activated', 'admin', { election_id: election.id });
 
     res.json({ success: true, message: 'Election is now active' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── API: All Elections ─────────────────────────────────────────────────────
+
+router.get('/api/elections', requireAdmin, async (req, res) => {
+  try {
+    const elections = await queries.getAllElections();
+    const electionsWithStats = await Promise.all(
+      elections.map(async (e) => {
+        const stats = await queries.getVoterStats(e.id);
+        return { ...e, stats };
+      })
+    );
+    res.json({ elections: electionsWithStats });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
@@ -364,6 +383,7 @@ function renderDashboard(csrfToken) {
   <button class="tab-btn active" onclick="showTab('setup')">⚙️ Setup</button>
   <button class="tab-btn" onclick="showTab('dashboard')">📊 Dashboard</button>
   <button class="tab-btn" onclick="showTab('results')">📈 Results</button>
+  <button class="tab-btn" onclick="showTab('history')">🗂️ History</button>
   <button class="tab-btn" onclick="showTab('audit')">🔍 Audit Log</button>
 </div>
 
@@ -483,6 +503,14 @@ function renderDashboard(csrfToken) {
   </div>
 </div>
 
+<!-- HISTORY TAB -->
+<div id="tab-history" class="tab-content">
+  <div class="section">
+    <h2>🗂️ Election History</h2>
+    <div id="history-container">Loading…</div>
+  </div>
+</div>
+
 <!-- RESULTS TAB -->
 <div id="tab-results" class="tab-content">
   <div class="section">
@@ -514,6 +542,7 @@ function showTab(name) {
 
   if (name === 'dashboard') loadDashboard();
   if (name === 'results') loadResults();
+  if (name === 'history') loadHistory();
   if (name === 'audit') loadAuditLog();
 }
 
@@ -539,6 +568,8 @@ async function apiGet(url) {
   return resp.json();
 }
 
+// ── Setup ──────────────────────────────────────────────────────────────────
+
 async function loadSetupState() {
   const data = await apiGet('/admin/api/election');
   if (data.election) {
@@ -546,41 +577,68 @@ async function loadSetupState() {
     document.getElementById('create-election-form').style.display = 'none';
     const info = document.getElementById('election-info');
     info.style.display = 'block';
-    info.innerHTML = \`<div style="padding:12px 16px;background:#eaf4fd;border-radius:8px;font-size:14px;">
+
+    const isRevealed = data.election.status === 'revealed';
+    const newElectionBtn = isRevealed
+      ? \`<div style="margin-top:10px;"><p style="color:#1e8449;font-size:13px;margin-bottom:10px;">✅ This election is complete. You can start a new election below.</p><button class="btn btn-primary" onclick="showNewElectionForm()" style="font-size:14px;padding:10px 20px;">+ Start New Election</button></div>\`
+      : '';
+    info.innerHTML = \`<div style="padding:12px 16px;background:\${isRevealed ? '#e9f7ef' : '#eaf4fd'};border-radius:8px;font-size:14px;">
       <strong>\${escHtml(data.election.title)}</strong>
       <span class="badge badge-\${data.election.status}" style="margin-left:8px;">\${data.election.status}</span>
       \${data.election.description ? \`<p style="color:#5d6d7e;margin-top:4px;">\${escHtml(data.election.description)}</p>\` : ''}
+      \${newElectionBtn}
     </div>\`;
 
-    document.getElementById('questions-section').style.display = 'block';
-    document.getElementById('voters-section').style.display = 'block';
+    if (!isRevealed) {
+      document.getElementById('questions-section').style.display = 'block';
+      document.getElementById('voters-section').style.display = 'block';
 
-    if (data.questions && data.questions.length >= 1) {
-      const q1 = data.questions.find(q => q.question_order === 1);
-      if (q1) {
-        document.getElementById('q1-text').value = q1.question_text;
-        q1Options = q1.options.map(o => ({ text: o.option_text, is_blank: o.is_blank, saved: true, id: o.id }));
-        renderOptionList(1);
-      }
-      const q2 = data.questions.find(q => q.question_order === 2);
-      if (q2) {
-        document.getElementById('q2-text').value = q2.question_text;
-        if (q2.constraint_type === 'exclude_q1_selection') {
-          document.getElementById('q2-constraint').checked = true;
+      if (data.questions && data.questions.length >= 1) {
+        const q1 = data.questions.find(q => q.question_order === 1);
+        if (q1) {
+          document.getElementById('q1-text').value = q1.question_text;
+          q1Options = q1.options.map(o => ({ text: o.option_text, is_blank: o.is_blank, saved: true, id: o.id }));
+          renderOptionList(1);
         }
-        q2Options = q2.options.map(o => ({ text: o.option_text, is_blank: o.is_blank, saved: true, id: o.id }));
-        renderOptionList(2);
+        const q2 = data.questions.find(q => q.question_order === 2);
+        if (q2) {
+          document.getElementById('q2-text').value = q2.question_text;
+          if (q2.constraint_type === 'exclude_q1_selection') {
+            document.getElementById('q2-constraint').checked = true;
+          }
+          q2Options = q2.options.map(o => ({ text: o.option_text, is_blank: o.is_blank, saved: true, id: o.id }));
+          renderOptionList(2);
+        }
       }
-    }
 
-    if (data.stats && data.stats.total > 0) {
-      renderVoterList(data);
-    }
+      if (data.stats && data.stats.total > 0) {
+        renderVoterList(data);
+      }
 
-    if (data.election.status === 'draft') {
-      document.getElementById('activate-section').style.display = 'block';
+      if (data.election.status === 'draft') {
+        document.getElementById('activate-section').style.display = 'block';
+      }
     }
   }
+}
+
+function showNewElectionForm() {
+  electionData = null;
+  q1Options = [];
+  q2Options = [];
+  document.getElementById('election-info').style.display = 'none';
+  document.getElementById('create-election-form').style.display = 'block';
+  document.getElementById('questions-section').style.display = 'none';
+  document.getElementById('voters-section').style.display = 'none';
+  document.getElementById('activate-section').style.display = 'none';
+  document.getElementById('election-title').value = '';
+  document.getElementById('election-desc').value = '';
+  document.getElementById('q1-text').value = '';
+  document.getElementById('q2-text').value = '';
+  document.getElementById('q1-options-list').innerHTML = '';
+  document.getElementById('q2-options-list').innerHTML = '';
+  document.getElementById('q2-constraint').checked = false;
+  document.getElementById('msg-election').style.display = 'none';
 }
 
 async function createElection() {
@@ -647,6 +705,7 @@ async function saveQuestions() {
   const electionId = electionData.election.id;
   const q2Constraint = document.getElementById('q2-constraint').checked ? 'exclude_q1_selection' : null;
 
+  // Save Q1
   const r1 = await apiPost('/admin/api/questions', {
     election_id: electionId,
     question_text: q1Text,
@@ -655,6 +714,7 @@ async function saveQuestions() {
   });
   if (!r1.success) return showMsg('msg-questions', r1.error || 'Error saving Q1', true);
 
+  // Save Q1 options (unsaved only)
   for (let i = 0; i < q1Options.length; i++) {
     const o = q1Options[i];
     if (!o.saved) {
@@ -667,6 +727,7 @@ async function saveQuestions() {
     }
   }
 
+  // Save Q2
   const r2 = await apiPost('/admin/api/questions', {
     election_id: electionId,
     question_text: q2Text,
@@ -675,6 +736,7 @@ async function saveQuestions() {
   });
   if (!r2.success) return showMsg('msg-questions', r2.error || 'Error saving Q2', true);
 
+  // Save Q2 options (unsaved only)
   for (let i = 0; i < q2Options.length; i++) {
     const o = q2Options[i];
     if (!o.saved) {
@@ -711,6 +773,8 @@ async function importVoters() {
 }
 
 function renderVoterList(data) {
+  // Get actual voter list from /admin/api/election which doesn't include individual voters
+  // We use stats display instead
   const container = document.getElementById('voters-list-container');
   const stats = data.stats;
   if (stats && stats.total > 0) {
@@ -730,6 +794,8 @@ async function activateElection() {
     alert('Error: ' + (data.error || 'Could not activate election.'));
   }
 }
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
 
 async function loadDashboard() {
   const data = await apiGet('/admin/api/election');
@@ -753,7 +819,41 @@ async function loadDashboard() {
   const pct = stats.total > 0 ? Math.round((stats.voted / stats.total) * 100) : 0;
   document.getElementById('progress-pct').textContent = pct + '%';
   document.getElementById('progress-fill').style.width = pct + '%';
+
 }
+
+// ── History ────────────────────────────────────────────────────────────────
+
+async function loadHistory() {
+  const container = document.getElementById('history-container');
+  const data = await apiGet('/admin/api/elections');
+  if (!data.elections || data.elections.length === 0) {
+    container.innerHTML = '<p style="color:#7f8c8d;">No elections yet.</p>';
+    return;
+  }
+
+  const rows = data.elections.map(e => {
+    const pct = e.stats.total > 0 ? Math.round((e.stats.voted / e.stats.total) * 100) : 0;
+    const created = new Date(e.created_at).toLocaleDateString();
+    const resultsLink = e.status === 'revealed'
+      ? \`<a href="/results/\${e.id}" target="_blank" style="color:#2980b9;font-size:13px;">View Results →</a>\`
+      : \`<span style="color:#95a5a6;font-size:13px;">\${e.status}</span>\`;
+    return \`<tr>
+      <td style="font-weight:600;">\${escHtml(e.title)}</td>
+      <td><span class="badge badge-\${e.status}">\${e.status}</span></td>
+      <td style="font-size:13px;color:#7f8c8d;">\${created}</td>
+      <td style="font-size:13px;">\${e.stats.voted} / \${e.stats.total} (\${pct}%)</td>
+      <td>\${resultsLink}</td>
+    </tr>\`;
+  }).join('');
+
+  container.innerHTML = \`<table class="audit-table">
+    <thead><tr><th>Election</th><th>Status</th><th>Created</th><th>Turnout</th><th>Results</th></tr></thead>
+    <tbody>\${rows}</tbody>
+  </table>\`;
+}
+
+// ── Results ────────────────────────────────────────────────────────────────
 
 async function loadResults() {
   const elData = await apiGet('/admin/api/election');
@@ -808,6 +908,8 @@ async function loadResults() {
   container.innerHTML = html || '<p>No results available.</p>';
 }
 
+// ── Audit Log ──────────────────────────────────────────────────────────────
+
 async function loadAuditLog() {
   const data = await apiGet('/admin/api/audit-log');
   const container = document.getElementById('audit-container');
@@ -838,6 +940,7 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Init
 loadSetupState();
 </script>
 </body>
