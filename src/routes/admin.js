@@ -843,17 +843,48 @@ async function loadDashboard() {
   if (!vData.voters || vData.voters.length === 0) {
     vlContainer.innerHTML = '<p style="color:#7f8c8d;font-size:14px;">No voters imported yet.</p>';
   } else {
-    const sorted = [...vData.voters].sort((a, b) => a.email.localeCompare(b.email));
-    const rows = sorted.map(v => {
-      const badge = v.has_voted
-        ? \`<span style="color:#27ae60;font-weight:600;">✓ Voted</span>\`
-        : \`<span style="color:#e67e22;">Pending</span>\`;
-      return \`<tr><td style="font-size:13px;">\${escHtml(v.email)}</td><td style="font-size:13px;">\${badge}</td></tr>\`;
-    }).join('');
-    vlContainer.innerHTML = \`<table class="audit-table">
-      <thead><tr><th>Email</th><th>Status</th></tr></thead>
-      <tbody>\${rows}</tbody>
-    </table>\`;
+    const allVoters = [...vData.voters].sort((a, b) => a.email.localeCompare(b.email));
+    const votedCount = allVoters.filter(v => v.has_voted).length;
+    const pendingCount = allVoters.length - votedCount;
+
+    function renderVoterTable(filter) {
+      const filtered = filter === 'voted' ? allVoters.filter(v => v.has_voted)
+                     : filter === 'pending' ? allVoters.filter(v => !v.has_voted)
+                     : allVoters;
+      if (filtered.length === 0) {
+        return '<p style="color:#7f8c8d;font-size:14px;padding:12px 0;">No voters match this filter.</p>';
+      }
+      const rows = filtered.map(v => {
+        const badge = v.has_voted
+          ? \`<span style="color:#27ae60;font-weight:600;">✓ Voted</span>\`
+          : \`<span style="color:#e67e22;">✗ Not voted yet</span>\`;
+        return \`<tr><td style="font-size:13px;">\${escHtml(v.email)}</td><td style="font-size:13px;">\${badge}</td></tr>\`;
+      }).join('');
+      return \`<table class="audit-table">
+        <thead><tr><th>Email</th><th>Status</th></tr></thead>
+        <tbody>\${rows}</tbody>
+      </table>\`;
+    }
+
+    vlContainer.innerHTML = \`
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+        <button class="btn btn-secondary vf-btn" data-filter="all" style="padding:6px 14px;font-size:13px;">All (\${allVoters.length})</button>
+        <button class="btn vf-btn" data-filter="voted" style="padding:6px 14px;font-size:13px;background:#e9f7ef;color:#1e8449;">✓ Voted (\${votedCount})</button>
+        <button class="btn vf-btn" data-filter="pending" style="padding:6px 14px;font-size:13px;background:#fef9e7;color:#d68910;">✗ Pending (\${pendingCount})</button>
+      </div>
+      <div id="voter-table-body">\${renderVoterTable('all')}</div>
+    \`;
+
+    let activeFilter = 'all';
+    vlContainer.querySelectorAll('.vf-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeFilter = btn.dataset.filter;
+        vlContainer.querySelectorAll('.vf-btn').forEach(b => b.style.fontWeight = '400');
+        btn.style.fontWeight = '700';
+        document.getElementById('voter-table-body').innerHTML = renderVoterTable(activeFilter);
+      });
+    });
+    vlContainer.querySelector('[data-filter="all"]').style.fontWeight = '700';
   }
 }
 
