@@ -150,7 +150,6 @@ router.post('/api/voters', requireAdmin, csrfProtection, async (req, res) => {
       return res.status(400).json({ error: 'No valid email addresses found' });
     }
 
-    // Check for duplicates against existing voters
     const existing = await queries.getVotersByElection(electionId);
     const existingEmails = new Set(existing.map(v => v.email.toLowerCase()));
     const newEmails = emails.filter(e => !existingEmails.has(e));
@@ -168,60 +167,6 @@ router.post('/api/voters', requireAdmin, csrfProtection, async (req, res) => {
     });
 
     res.json({ success: true, created: created.length, skipped: emails.length - created.length });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ── API: Send Tokens ───────────────────────────────────────────────────────
-
-router.post('/api/send-tokens', requireAdmin, csrfProtection, async (req, res) => {
-  try {
-    const election = await queries.getActiveElection();
-    if (!election) return res.status(404).json({ error: 'No election found' });
-
-    const voters = await queries.getVotersByElection(election.id);
-    const unsent = voters.filter(v => !v.token_sent_at);
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-
-    res.json({ success: true, sending: unsent.length, message: `Sending tokens to ${unsent.length} voter(s)` });
-
-    // Send async
-    setImmediate(async () => {
-      await emailService.batchSend(unsent, async (voter) => {
-        await emailService.sendVoteToken(voter.email, voter.vote_token, election.title, baseUrl);
-        await queries.markTokenSent(voter.id);
-      });
-      await queries.logAudit('tokens_sent', 'admin', { election_id: election.id, count: unsent.length });
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ── API: Remind ────────────────────────────────────────────────────────────
-
-router.post('/api/remind', requireAdmin, csrfProtection, async (req, res) => {
-  try {
-    const election = await queries.getActiveElection();
-    if (!election) return res.status(404).json({ error: 'No election found' });
-
-    const unvoted = await queries.getUnvotedVoters(election.id);
-    if (unvoted.length === 0) {
-      return res.json({ success: true, sent: 0, message: 'All voters have already voted' });
-    }
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-
-    res.json({ success: true, sending: unvoted.length, message: `Sending reminders to ${unvoted.length} voter(s)` });
-
-    setImmediate(async () => {
-      await emailService.batchSend(unvoted, async (voter) => {
-        await emailService.sendReminder(voter.email, voter.vote_token, election.title, baseUrl);
-      });
-      await queries.logAudit('reminders_sent', 'admin', { election_id: election.id, count: unvoted.length });
-    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
@@ -528,11 +473,13 @@ function renderDashboard(csrfToken) {
       <div class="progress-label"><span>Voting Progress</span><span id="progress-pct">0%</span></div>
       <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
     </div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;">
-      <button class="btn btn-primary" onclick="sendTokens()">📧 Send Voting Tokens</button>
-      <button class="btn btn-warning" id="btn-remind" onclick="sendReminders()">🔔 Remind Unvoted</button>
+    <div style="background:#eaf4fd;border-radius:8px;padding:14px 18px;margin-top:8px;">
+      <div style="font-size:13px;font-weight:600;color:#1a5276;margin-bottom:4px;">🗳️ Voting URL</div>
+      <div style="font-size:15px;font-family:monospace;color:#2c3e50;">
+        <a href="/vote" target="_blank" style="color:#2980b9;">/vote</a>
+      </div>
+      <div style="font-size:12px;color:#7f8c8d;margin-top:4px;">Share this link with voters. They will enter their email address to access the ballot.</div>
     </div>
-    <div id="msg-tokens" class="msg" style="margin-top:10px;"></div>
   </div>
 </div>
 
@@ -592,8 +539,6 @@ async function apiGet(url) {
   return resp.json();
 }
 
-// ── Setup ──────────────────────────────────────────────────────────────────
-
 async function loadSetupState() {
   const data = await apiGet('/admin/api/election');
   if (data.election) {
@@ -610,7 +555,6 @@ async function loadSetupState() {
     document.getElementById('questions-section').style.display = 'block';
     document.getElementById('voters-section').style.display = 'block';
 
-    // Show existing questions in the UI
     if (data.questions && data.questions.length >= 1) {
       const q1 = data.questions.find(q => q.question_order === 1);
       if (q1) {
@@ -629,9 +573,7 @@ async function loadSetupState() {
       }
     }
 
-    // Show voters
     if (data.stats && data.stats.total > 0) {
-      const voters = await apiGet('/admin/api/election');
       renderVoterList(data);
     }
 
@@ -705,7 +647,6 @@ async function saveQuestions() {
   const electionId = electionData.election.id;
   const q2Constraint = document.getElementById('q2-constraint').checked ? 'exclude_q1_selection' : null;
 
-  // Save Q1
   const r1 = await apiPost('/admin/api/questions', {
     election_id: electionId,
     question_text: q1Text,
@@ -714,7 +655,6 @@ async function saveQuestions() {
   });
   if (!r1.success) return showMsg('msg-questions', r1.error || 'Error saving Q1', true);
 
-  // Save Q1 options (unsaved only)
   for (let i = 0; i < q1Options.length; i++) {
     const o = q1Options[i];
     if (!o.saved) {
@@ -727,7 +667,6 @@ async function saveQuestions() {
     }
   }
 
-  // Save Q2
   const r2 = await apiPost('/admin/api/questions', {
     election_id: electionId,
     question_text: q2Text,
@@ -736,7 +675,6 @@ async function saveQuestions() {
   });
   if (!r2.success) return showMsg('msg-questions', r2.error || 'Error saving Q2', true);
 
-  // Save Q2 options (unsaved only)
   for (let i = 0; i < q2Options.length; i++) {
     const o = q2Options[i];
     if (!o.saved) {
@@ -773,8 +711,6 @@ async function importVoters() {
 }
 
 function renderVoterList(data) {
-  // Get actual voter list from /admin/api/election which doesn't include individual voters
-  // We use stats display instead
   const container = document.getElementById('voters-list-container');
   const stats = data.stats;
   if (stats && stats.total > 0) {
@@ -788,14 +724,12 @@ async function activateElection() {
   if (!confirm('Are you sure you want to activate this election? Voters will be able to cast their ballots.')) return;
   const data = await apiPost('/admin/api/activate', {});
   if (data.success) {
-    alert('Election activated! You can now send voting tokens from the Dashboard tab.');
+    alert('Election activated! Share the voting URL /vote with your voters.');
     location.reload();
   } else {
     alert('Error: ' + (data.error || 'Could not activate election.'));
   }
 }
-
-// ── Dashboard ──────────────────────────────────────────────────────────────
 
 async function loadDashboard() {
   const data = await apiGet('/admin/api/election');
@@ -819,21 +753,7 @@ async function loadDashboard() {
   const pct = stats.total > 0 ? Math.round((stats.voted / stats.total) * 100) : 0;
   document.getElementById('progress-pct').textContent = pct + '%';
   document.getElementById('progress-fill').style.width = pct + '%';
-
-  document.getElementById('btn-remind').disabled = stats.not_voted === 0;
 }
-
-async function sendTokens() {
-  const data = await apiPost('/admin/api/send-tokens', {});
-  showMsg('msg-tokens', data.message || (data.error ? data.error : 'Done'), !!data.error);
-}
-
-async function sendReminders() {
-  const data = await apiPost('/admin/api/remind', {});
-  showMsg('msg-tokens', data.message || (data.error ? data.error : 'Done'), !!data.error);
-}
-
-// ── Results ────────────────────────────────────────────────────────────────
 
 async function loadResults() {
   const elData = await apiGet('/admin/api/election');
@@ -888,8 +808,6 @@ async function loadResults() {
   container.innerHTML = html || '<p>No results available.</p>';
 }
 
-// ── Audit Log ──────────────────────────────────────────────────────────────
-
 async function loadAuditLog() {
   const data = await apiGet('/admin/api/audit-log');
   const container = document.getElementById('audit-container');
@@ -920,7 +838,6 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Init
 loadSetupState();
 </script>
 </body>
