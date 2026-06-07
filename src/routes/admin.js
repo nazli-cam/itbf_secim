@@ -133,6 +133,18 @@ router.post('/api/options', requireAdmin, csrfProtection, async (req, res) => {
 
 // ── API: Voters ────────────────────────────────────────────────────────────
 
+router.get('/api/voters', requireAdmin, async (req, res) => {
+  try {
+    const election = await queries.getActiveElection();
+    if (!election) return res.json({ voters: [] });
+    const voters = await queries.getVotersByElection(election.id);
+    res.json({ voters: voters.map(v => ({ email: v.email, has_voted: v.has_voted })) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.post('/api/voters', requireAdmin, csrfProtection, async (req, res) => {
   try {
     const { election_id, emails_raw } = req.body;
@@ -501,6 +513,11 @@ function renderDashboard(csrfToken) {
       <div style="font-size:12px;color:#7f8c8d;margin-top:4px;">Share this link with voters. They will enter their email address to access the ballot.</div>
     </div>
   </div>
+
+  <div class="section">
+    <h2>📋 Voter List</h2>
+    <div id="voter-list-container">Loading…</div>
+  </div>
 </div>
 
 <!-- HISTORY TAB -->
@@ -820,6 +837,24 @@ async function loadDashboard() {
   document.getElementById('progress-pct').textContent = pct + '%';
   document.getElementById('progress-fill').style.width = pct + '%';
 
+  // Voter list
+  const vData = await apiGet('/admin/api/voters');
+  const vlContainer = document.getElementById('voter-list-container');
+  if (!vData.voters || vData.voters.length === 0) {
+    vlContainer.innerHTML = '<p style="color:#7f8c8d;font-size:14px;">No voters imported yet.</p>';
+  } else {
+    const sorted = [...vData.voters].sort((a, b) => a.email.localeCompare(b.email));
+    const rows = sorted.map(v => {
+      const badge = v.has_voted
+        ? \`<span style="color:#27ae60;font-weight:600;">✓ Voted</span>\`
+        : \`<span style="color:#e67e22;">Pending</span>\`;
+      return \`<tr><td style="font-size:13px;">\${escHtml(v.email)}</td><td style="font-size:13px;">\${badge}</td></tr>\`;
+    }).join('');
+    vlContainer.innerHTML = \`<table class="audit-table">
+      <thead><tr><th>Email</th><th>Status</th></tr></thead>
+      <tbody>\${rows}</tbody>
+    </table>\`;
+  }
 }
 
 // ── History ────────────────────────────────────────────────────────────────
